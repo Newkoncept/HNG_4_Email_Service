@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        .email-container {
+            max-width: 600px;
+            margin: 0 auto;
+            font-family: Arial, sans-serif;
+        }
+        .button {
+            background-color: #211FA6;
+            border: none;
+            color: white;
+            padding: 15px 32px;
+            text-align: center;
+            text-decoration: none;
+            display: inline-block;
+            font-size: 16px;
+            margin: 4px 2px;
+            cursor: pointer;
+            border-radius: 10px
+        }
+    </style>
+</head>
+<body>
+    <div class="email-container">
+        <h1>Welcome to {{ site_name }}!</h1>
+        <p>Hello {{ user_email }},</p>
+        <p>Thank you for joining our platform. We're excited to have you on board!</p>
+        <a href="https://sendlayer.com/docs/welcome-to-sendlayer/" class="button">Get Started</a>
+    </div>
+</body>
+</html>
