@@ -293,7 +293,11 @@ def callback(channel, method, properties, body):
             elif template_code == "update":
                 title = "New Update Available :rocket:"
                 body =  "We've rolled out new features and improvements. Update your app to enjoy the latest experience."
-                
+            else:
+                publish_failed(channel, payload, f"Requested Template not found")
+                channel.basic_ack(delivery_tag=method.delivery_tag)
+                return
+
             
             # try:
             #     # notification_template = get_online_data(f"template_url")
@@ -331,10 +335,10 @@ def callback(channel, method, properties, body):
                     republish_with_retry(channel, payload, attempt)
                     channel.basic_ack(delivery_tag=method.delivery_tag)
                     return
-            else:
-                publish_failed(channel, payload, f"Requested Template not found")
-                channel.basic_ack(delivery_tag=method.delivery_tag)
-                return
+            # else:
+            #     publish_failed(channel, payload, f"Requested Template not found")
+            #     channel.basic_ack(delivery_tag=method.delivery_tag)
+            #     return
         else:
             publish_failed(channel, payload, f"User Detail not found")
             channel.basic_ack(delivery_tag=method.delivery_tag)
