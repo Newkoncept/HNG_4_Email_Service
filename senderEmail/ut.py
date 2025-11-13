@@ -7,30 +7,22 @@ def populate():
     channel = connection.channel()
 
     channel.exchange_declare(exchange="notification", exchange_type="direct", durable=True)
-    # channel.exchange_declare(exchange="", exchange_type="direct", durable=True)
-
-    # Send an example email message
-    # message = {
-    #     "request_id": str(uuid4()),
-    #     "to_email": "bounce+550+no+such+user+here@inbox.mailtrap.io",
-    #     "subject": "Test Email",
-    #     "body": "This is a mock test email.",
-    #     "attempt": 0
-    # }
 
     message = {
-                "notification_type": "email",
-                "user_id": "8e84e565-36af-4c1f-9f1b-9016c3a08acc",
-                "template_code": "WELCOME_EMAIL",
-                "variables": {
-                    "name": "Alex Smith",
-                    "link": "sample.com",
-                    "meta": {}
-                },
-                "request_id": "req-email-8235",
-                "priority": 3,
-                "metadata": {}
-            }
+  "notification_type": "email",
+  "user_id": "8e84e565-36af-4c1f-9f1b-9016c3a08acc",
+  "template_code": "reminder",
+  "variables": {
+    "name": "Alex Smith",
+    "link": "https://example.com/activate",
+    "meta": {},
+    "event_name": "Birthday ",
+    "event_date": "15th Nov"
+  },
+  "request_id": "req-email-12345",
+  "priority": 3,
+  "metadata": {}
+}
     
     channel.basic_publish(
         # exchange="hng_stage_four",

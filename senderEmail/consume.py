@@ -269,7 +269,7 @@ def callback(channel, method, properties, body):
     try:
         try:
             user_detail = get_online_data(
-                f"https://server-production-5772.up.railway.app/api/v1/users/{payload.get('user_id')}/"
+                f"https://server-production-5772.up.railway.app/api/v1/users/{payload.get('user_id')}"
             )
         except pybreaker.CircuitBreakerError:
             if attempt + 1 < MAX_RETRIES:
