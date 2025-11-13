@@ -38,8 +38,6 @@ EXCHANGE_TYPE           = env("EXCHANGE_TYPE")
 RETRY_QUEUE             = env("RETRY_QUEUE")
 PREFETCH_COUNT          = 1
 
-# title = None
-# body = None
 logger = logging.getLogger(__name__)
 
 
@@ -189,6 +187,8 @@ def send_email_with_id(payload: dict):
     # })
     # html_body = strip_tags(html_message)
 
+    
+
     headers = {
         # Mailtrap's SMTP custom-variables header (JSON, <= 1000 bytes)
         "X-MT-Custom-Variables": json.dumps({"request_id": request_id}),
@@ -207,7 +207,7 @@ def send_email_with_id(payload: dict):
 
 
     email.send(fail_silently=False)
-    print(f"✅ Sent email with X-Notification-ID={request_id}")
+    logger.info(f"✅ Sent email with X-Notification-ID={request_id}")
 
 
 @http_breaker
@@ -234,13 +234,11 @@ def callback(channel, method, properties, body):
         payload = json.loads(body.decode("utf-8"))
     except Exception as e:
         raw_body = body.decode("utf-8", errors="replace")
-        print("❌ Invalid JSON, discarding message")
-
         failed_pay_load = {
             "raw_body" : raw_body
         }
 
-        publish_failed(channel, failed_pay_load, f"invalid_json: {e}")
+        publish_failed(channel, failed_pay_load, f"invalid json format: {e}")
         channel.basic_ack(delivery_tag=method.delivery_tag)
         return
     
@@ -256,12 +254,12 @@ def callback(channel, method, properties, body):
 
     request_id = payload.get("request_id", None)
     user_id = payload.get("user_id", "")
-    template_code = payload.get("template_code", "")
+    template_code = str(payload.get("template_code", "")).lower()
     variables = payload.get("variables", {})
     meta = payload.get("meta", {})
     attempt = int(payload.get("attempt", 0))
 
-    print(f"\n📨 Received message: request_id={request_id} user_id={user_id}")
+    logger.info(f"\n📨 Received message: request_id={request_id} user_id={user_id}")
 
     if not isinstance(user_id, str) or not user_id.strip():
         publish_failed(channel, payload, "invalid_user_id")
@@ -271,7 +269,7 @@ def callback(channel, method, properties, body):
     try:
         try:
             user_detail = get_online_data(
-                f"https://server-production-5772.up.railway.app/api/v1/users/{payload.get('user_id')}"
+                f"https://server-production-5772.up.railway.app/api/v1/users/{payload.get('user_id')}/"
             )
         except pybreaker.CircuitBreakerError:
             if attempt + 1 < MAX_RETRIES:
@@ -280,10 +278,9 @@ def callback(channel, method, properties, body):
                 channel.basic_ack(delivery_tag=method.delivery_tag)
                 return
 
-        print(user_detail)
-        print(template_code)
         if user_detail.get("success", ""):
-            
+            template_code = template_code.lower()
+            # print(payload.get("variables").get("event_name"))
 
             if template_code == "reminder":
                 title = f"Hey {user_detail.get("data").get("name")}, don't forget"
@@ -328,8 +325,8 @@ def callback(channel, method, properties, body):
 
             # --- SMTP SEND (breaker-aware) ---
             try:
-                send_email_with_id(email_payload)   # enable when ready to send for real
-                print(f"✅ Email sent for request_id={request_id}")
+                send_email_with_id(email_payload)   
+                logger.info(f"✅ Email sent for request_id={request_id}")
                 channel.basic_ack(delivery_tag=method.delivery_tag)
             except pybreaker.CircuitBreakerError:
                 # smtp breaker OPEN → schedule retry
@@ -347,7 +344,7 @@ def callback(channel, method, properties, body):
 
     except (smtplib.SMTPException, OSError) as exc:
         # Transient / network / SMTP failure → retry or fail
-        print(f"⚠️ Error sending email for request_id={request_id}: {exc}")
+        logger.info(f"⚠️ Error sending email for request_id={request_id}: {exc}")
 
         if attempt + 1 < MAX_RETRIES:
             # Schedule retry by republishing with incremented attempt
@@ -356,13 +353,13 @@ def callback(channel, method, properties, body):
             channel.basic_ack(delivery_tag=method.delivery_tag)
         else:
             # Max retries reached → send to failed.queue
-            print(f"💣 Max retries reached for request_id={request_id}, moving to failed.queue")
+            logger.info(f"💣 Max retries reached for request_id={request_id}, moving to failed.queue")
             publish_failed(channel, payload, f"Max-retries reached: {str(exc)}")
             channel.basic_ack(delivery_tag=method.delivery_tag)
 
     except Exception as exc:
         # Unknown / fatal error → send straight to failed.queue
-        print(f"🔥 Unexpected error for request_id={request_id}: {exc}")
+        logger.info(f"🔥 Unexpected error for request_id={request_id}: {exc}")
         publish_failed(channel, payload, f"unexpected_error: {exc}")
         channel.basic_ack(delivery_tag=method.delivery_tag)
 
