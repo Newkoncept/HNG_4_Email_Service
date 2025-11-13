@@ -15,48 +15,6 @@ from django.core.mail import EmailMultiAlternatives
 import pybreaker
 
 
-LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()           # DEBUG|INFO|WARNING|ERROR
-LOG_JSON  = os.getenv("LOG_JSON", "false").lower() == "true" # plain text by default
-
-class _PayloadFilter(logging.Filter):
-    def __init__(self):
-        super().__init__()
-        self._ctx = {"request_id": "-", "notification_id": "-", "attempt": "-"}
-
-    def set_context(self, request_id=None, notification_id=None, attempt=None):
-        if request_id is not None:
-            self._ctx["request_id"] = request_id
-        if notification_id is not None:
-            self._ctx["notification_id"] = notification_id
-        if attempt is not None:
-            self._ctx["attempt"] = attempt
-
-    def filter(self, record):
-        record.request_id = self._ctx.get("request_id")
-        record.notification_id = self._ctx.get("notification_id")
-        record.attempt = self._ctx.get("attempt")
-        return True
-
-
-_payload_filter = _PayloadFilter()
-
-if LOG_JSON:
-    fmt = '{"ts":"%(asctime)s","lvl":"%(levelname)s","msg":"%(message)s",' \
-          '"request_id":"%(request_id)s","notification_id":"%(notification_id)s","attempt":"%(attempt)s"}'
-    datefmt = "%Y-%m-%dT%H:%M:%SZ"
-else:
-    fmt = "%(asctime)s | %(levelname)s | req=%(request_id)s notif=%(notification_id)s attempt=%(attempt)s | %(message)s"
-    datefmt = "%Y-%m-%d %H:%M:%S"
-
-logging.basicConfig(
-    level=LOG_LEVEL,
-    format=fmt,
-    datefmt=datefmt,
-    handlers=[logging.StreamHandler(sys.stdout)],
-)
-logger = logging.getLogger("email-service")
-logger.addFilter(_payload_filter)
-
 
 BASE_DIR = Path(__file__).resolve().parent.parent 
 if str(BASE_DIR) not in sys.path:
@@ -80,6 +38,9 @@ EXCHANGE_TYPE           = env("EXCHANGE_TYPE")
 RETRY_QUEUE             = env("RETRY_QUEUE")
 PREFETCH_COUNT          = 1
 
+# title = None
+# body = None
+logger = logging.getLogger(__name__)
 
 
 MAX_RETRIES = 3  # max send attempts per notification
@@ -95,6 +56,22 @@ http_breaker = pybreaker.CircuitBreaker(
     reset_timeout=30,
     name="user_service_breaker"
 )
+
+
+data = {
+    "reminder": {
+        "title": "Hey {{user_name}}, don’t forget!",
+        "body": "Your {{event_name}} is coming up on {{event_date}}. Tap to view details.",
+        "image_url": "{{event_banner_url}}",
+        "icon_url": "{{reminder_icon_url}}"
+    },
+    "welcome": {
+        "title": "Welcome to {{app_name}} :wave:",
+        "body": "Hi {{user_name}}, we’re excited to have you on board! Explore your dashboard to get started.",
+        "image_url": "{{welcome_banner_url}}",
+        "icon_url": "{{app_icon_url}}"
+    }
+}
 
 def channel_publisher(channel, exchanger_name, routing_key, payload):
 
@@ -204,13 +181,13 @@ def send_email_with_id(payload: dict):
     to_email = payload.get("email", "")
     subject = payload.get("subject", "") 
     body = payload.get("body", "")
-    html_message = payload.get("rendered_content", "") 
+    # html_message = payload.get("rendered_content", "") 
 
     # html_message = render_to_string('senderEmail/welcome.html', {
     #     'user_email': to_email,
     #     'site_name': 'HNG 13 Stage 4 Group 37'
     # })
-    html_body = strip_tags(html_message)
+    # html_body = strip_tags(html_message)
 
     headers = {
         # Mailtrap's SMTP custom-variables header (JSON, <= 1000 bytes)
@@ -219,14 +196,14 @@ def send_email_with_id(payload: dict):
 
     email = EmailMultiAlternatives(
         subject=subject,
-        body=html_body,
+        body=body,
         from_email=os.getenv("DEFAULT_FROM_EMAIL"),
         to=[to_email],
         headers=headers
     )
 
     # HTML alternative
-    email.attach_alternative(html_message, "text/html")
+    # email.attach_alternative(html_message, "text/html")
 
 
     email.send(fail_silently=False)
@@ -305,34 +282,48 @@ def callback(channel, method, properties, body):
 
         print(user_detail)
         if user_detail.get("success", ""):
-            try:
-                # notification_template = get_online_data(f"template_url")
-                notification_template = get_online_data(
-                f"https://server-production-5772.up.railway.app/api/v1/users/{payload.get('user_id')}"
-            )
-            except pybreaker.CircuitBreakerError:
-                if attempt + 1 < MAX_RETRIES:
-                    # Template service breaker OPEN → don't hammer, defer
-                    republish_with_retry(channel, payload, attempt)
-                    channel.basic_ack(delivery_tag=method.delivery_tag)
-                    return
             
-            if notification_template.get("success", ""):
-                # Get required template
+
+            if template_code == "reminder":
+                title = f"Hey {user_detail.get("data").get("name")}, don't forget"
+                body = f"Your {payload.get("variables", "").get("event_name", "")} is coming up on {payload.get("variables", "").get("event_date", "")}"
+            elif template_code == "welcome":
+                title= f"Welcome to {payload.get("variables", "").get("app_name", "")}"
+                body= f"Hi {{user_name}}, we’re excited to have you on board! Explore your dashboard to get started."
+            elif template_code == "update":
+                title = "New Update Available :rocket:"
+                body =  "We've rolled out new features and improvements. Update your app to enjoy the latest experience."
+                
+            
+            # try:
+            #     # notification_template = get_online_data(f"template_url")
+            #     notification_template = get_online_data(
+            #     f"https://server-production-5772.up.railway.app/api/v1/users/{payload.get('user_id')}"
+            # )
+            # except pybreaker.CircuitBreakerError:
+            #     if attempt + 1 < MAX_RETRIES:
+            #         # Template service breaker OPEN → don't hammer, defer
+            #         republish_with_retry(channel, payload, attempt)
+            #         channel.basic_ack(delivery_tag=method.delivery_tag)
+            #         return
+
+
+            
+            # if notification_template.get("success", ""):
+            #     # Get required template
 
                 email_payload = {
                     "request_id" : request_id,
                     "email": (user_detail.get("data") or {}).get("email"),
-                    # "subject" : notification_template.get("subject"),
-                    # "body" : notification_template.get("body"),
+                    "subject" : title,
+                    "body" : body,
                     # "rendered_content" : notification_template.get("body"),
                 }
 
-                print(email_payload)
 
                 # --- SMTP SEND (breaker-aware) ---
                 try:
-                    # send_email_with_id(email_payload)   # enable when ready to send for real
+                    send_email_with_id(email_payload)   # enable when ready to send for real
                     print(f"✅ Email sent for request_id={request_id}")
                     channel.basic_ack(delivery_tag=method.delivery_tag)
                 except pybreaker.CircuitBreakerError:
