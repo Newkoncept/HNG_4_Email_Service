@@ -281,6 +281,7 @@ def callback(channel, method, properties, body):
                 return
 
         print(user_detail)
+        print(template_code)
         if user_detail.get("success", ""):
             
 
@@ -316,25 +317,25 @@ def callback(channel, method, properties, body):
             # if notification_template.get("success", ""):
             #     # Get required template
 
-                email_payload = {
-                    "request_id" : request_id,
-                    "email": (user_detail.get("data") or {}).get("email"),
-                    "subject" : title,
-                    "body" : body,
-                    # "rendered_content" : notification_template.get("body"),
-                }
+            email_payload = {
+                "request_id" : request_id,
+                "email": (user_detail.get("data") or {}).get("email"),
+                "subject" : title,
+                "body" : body,
+                # "rendered_content" : notification_template.get("body"),
+            }
 
 
-                # --- SMTP SEND (breaker-aware) ---
-                try:
-                    send_email_with_id(email_payload)   # enable when ready to send for real
-                    print(f"✅ Email sent for request_id={request_id}")
-                    channel.basic_ack(delivery_tag=method.delivery_tag)
-                except pybreaker.CircuitBreakerError:
-                    # smtp breaker OPEN → schedule retry
-                    republish_with_retry(channel, payload, attempt)
-                    channel.basic_ack(delivery_tag=method.delivery_tag)
-                    return
+            # --- SMTP SEND (breaker-aware) ---
+            try:
+                send_email_with_id(email_payload)   # enable when ready to send for real
+                print(f"✅ Email sent for request_id={request_id}")
+                channel.basic_ack(delivery_tag=method.delivery_tag)
+            except pybreaker.CircuitBreakerError:
+                # smtp breaker OPEN → schedule retry
+                republish_with_retry(channel, payload, attempt)
+                channel.basic_ack(delivery_tag=method.delivery_tag)
+                return
             # else:
             #     publish_failed(channel, payload, f"Requested Template not found")
             #     channel.basic_ack(delivery_tag=method.delivery_tag)
