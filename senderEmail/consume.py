@@ -212,12 +212,21 @@ def send_email_with_id(payload: dict):
 
 @http_breaker
 def get_online_data(url):   
-        response = requests.get(url, timeout=(5))
-        response.raise_for_status()
-
+        response = requests.get(url, timeout=5)
+        logger.info("User service responded with %s for URL %s", response.status_code, url)
+        try:
+            response.raise_for_status()
+        except requests.HTTPError as e:
+            # Log a snippet of the body so you can see the real error from Django
+            body_preview = response.text[:300] if response.text else ""
+            logger.error(
+                "HTTPError from user service: status=%s url=%s body=%s",
+                response.status_code,
+                url,
+                body_preview,
+            )
+            raise
         return response.json()
-    # except Exception as e:
-    #     return [None, str(e)]
     
 
 def callback(channel, method, properties, body):
