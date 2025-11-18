@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from rest_framework import status
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
+import requests
 
 @api_view(http_method_names=['GET'])
 def health_checker(api_view):
@@ -35,28 +36,37 @@ def webHook(request):
     if request.method == "POST":
         payload = json.loads(request.body.decode("utf-8"))
 
-        # events = (payload.get("events") or [])
-        # if not events:
-        #     return HttpResponse("ok")  # nothing to process
-
-        # evt = events[0]
-        # custom = evt.get("custom_variables") or {}
-        # request_id = custom.get("request_id")
-        # event = (evt.get("event") or "").lower()
-
         events = payload.get("events", "")[0]
 
         if events:
             event = events.get("event")
             request_id = events.get("custom_variables").get("request_id")
 
-            if event == "delivery":
-                pass #logic to update the DB with current status
-            elif event == "bounce":
-                pass #logic to update the DB with current status
-            elif event == "soft bounce":
-                pass #logic to update the DB with current status
+            url = "https://gateway-production-2b55.up.railway.app/api/v1/email/status"
+            headers = {
+                "x-api-key": "abcdef"
+            }
 
+            
+
+            
+
+
+            if event == "delivery":
+                payload = {
+                    "notification_id": request_id,
+                    "status": "delivered",
+                    "timestamp": str(datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"))
+
+                }
+                response = requests.post(url, json=payload, headers=headers)
+            else:
+                payload = {
+                    "notification_id": request_id,
+                    "status": "bounce",
+                    "timestamp": str(datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"))
+                }
+                response = requests.post(url, json=payload, headers=headers)
 
 
         print(f"Completed this webhook process by {datetime.now(timezone.utc)}")

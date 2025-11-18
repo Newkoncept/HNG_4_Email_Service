@@ -13,6 +13,7 @@ import environ # type: ignore
 from django.utils.html import strip_tags
 from django.core.mail import EmailMultiAlternatives
 import pybreaker
+from datetime import datetime, timezone
 
 
 
@@ -143,13 +144,18 @@ def republish_with_retry(channel, payload: dict, attempt: int):
     next_attempt = attempt + 1
     delay = min(2 ** next_attempt * 1000, 120000)  # 2, 4, 8, ... seconds
 
-    request_id =payload.get("request_id")
+    print(next_attempt)
+    print(delay)
+    print(payload)
+
+    # request_id =payload.get("request_id")
           
 
 
     # Update the payload for next attempt
     retry_payload = {**payload, "attempt": next_attempt}
     headers = {"x-retry-count": next_attempt}
+
 
 
     # Publish to RETRY_QUEUE with per-message TTL.
@@ -214,18 +220,8 @@ def send_email_with_id(payload: dict):
 def get_online_data(url):   
         response = requests.get(url, timeout=5)
         logger.info("User service responded with %s for URL %s", response.status_code, url)
-        try:
-            response.raise_for_status()
-        except requests.HTTPError as e:
-            # Log a snippet of the body so you can see the real error from Django
-            body_preview = response.text[:300] if response.text else ""
-            logger.error(
-                "HTTPError from user service: status=%s url=%s body=%s",
-                response.status_code,
-                url,
-                body_preview,
-            )
-            raise
+        response.raise_for_status()
+
         return response.json()
     
 
@@ -260,15 +256,32 @@ def callback(channel, method, properties, body):
         channel.basic_ack(delivery_tag=method.delivery_tag)
         return
 
+    {
+                "pattern": "send_email_event",
+                "data":{
+                  "notification_type": "email",
+                  "user_id": "c1e37847-4073-425e-a2a0-eafbf5b79098",
+                  "template_code": "REMINDER",
+                  "variables": {
+                    "name": "Alex Smith",
+                    "link": "https://example.com/view",
+                    "meta": {}
+                  },
+                  "request_id": "req-email-9296",
+                  "priority": 1,
+                  "metadata": {}
+                }
+              }
 
-    request_id = payload.get("request_id", None)
-    user_id = payload.get("user_id", "")
-    template_code = str(payload.get("template_code", "")).lower()
-    variables = payload.get("variables", {})
-    meta = payload.get("meta", {})
+    request_id = payload.get("data").get("request_id", None)
+    user_id = payload.get("data").get("user_id", "")
+    template_code = str(payload.get("data").get("template_code", "")).lower()
+    variables = payload.get("data").get("variables", {})
     attempt = int(payload.get("attempt", 0))
 
+
     logger.info(f"\n📨 Received message: request_id={request_id} user_id={user_id}")
+    
 
     if not isinstance(user_id, str) or not user_id.strip():
         publish_failed(channel, payload, "invalid_user_id")
@@ -278,14 +291,20 @@ def callback(channel, method, properties, body):
     try:
         try:
             user_detail = get_online_data(
-                f"https://server-production-5772.up.railway.app/api/v1/users/{payload.get('user_id')}"
+                f"https://server-production-5772.up.railway.app/api/v1/users/{user_id}"
             )
         except pybreaker.CircuitBreakerError:
+            print("breaker triggered")
             if attempt + 1 < MAX_RETRIES:
                 # User service breaker OPEN → don't hammer, defer
                 republish_with_retry(channel, payload, attempt)
                 channel.basic_ack(delivery_tag=method.delivery_tag)
                 return
+            else:
+                publish_failed(channel, payload, f"HTTP CIrcuit breaker")
+                channel.basic_ack(delivery_tag=method.delivery_tag)
+                return
+        
 
         if user_detail.get("success", ""):
             template_code = template_code.lower()
@@ -293,9 +312,9 @@ def callback(channel, method, properties, body):
 
             if template_code == "reminder":
                 title = f"Hey {user_detail.get("data").get("name")}, don't forget"
-                body = f"Your {payload.get("variables", "").get("event_name", "")} is coming up on {payload.get("variables", "").get("event_date", "")}"
+                body = f"Your {variables.get("event_name", "")} is coming up on {variables.get("event_date", "")}"
             elif template_code == "welcome":
-                title= f"Welcome to {payload.get("variables", "").get("app_name", "")}"
+                title= f"Welcome to {variables.get("app_name", "")}"
                 body= f"Hi {{user_name}}, we’re excited to have you on board! Explore your dashboard to get started."
             elif template_code == "update":
                 title = "New Update Available :rocket:"
@@ -331,11 +350,26 @@ def callback(channel, method, properties, body):
                 # "rendered_content" : notification_template.get("body"),
             }
 
+            # print(payload)
+            # return ""
 
             # --- SMTP SEND (breaker-aware) ---
             try:
                 send_email_with_id(email_payload)   
                 logger.info(f"✅ Email sent for request_id={request_id}")
+                url = "https://gateway-production-2b55.up.railway.app/api/v1/email/status"
+
+                payload = {
+                    "notification_id": request_id,
+                    "status": "sent",
+                    "timestamp": str(datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"))
+                }
+
+                headers = {
+                    "x-api-key": "abcdef"
+                }
+
+                response = requests.post(url, json=payload, headers=headers)
                 channel.basic_ack(delivery_tag=method.delivery_tag)
             except pybreaker.CircuitBreakerError:
                 # smtp breaker OPEN → schedule retry
